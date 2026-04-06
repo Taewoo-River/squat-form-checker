@@ -136,7 +136,10 @@ def _update_sidebar(analyzer):
 
     last = analyzer.get_last_rep_feedback()
     if last:
-        sb_last.success(last) if "Great" in last else sb_last.warning(last)
+        if "Great" in last:
+            sb_last.success(last)
+        else:
+            sb_last.warning(last)
 
 
 # ─── video-upload flow ───────────────────────────────────────────────
@@ -160,8 +163,6 @@ def run_video(path: str):
 
     frame_holder = st.empty()
     progress = st.progress(0)
-    prog_status = st.empty()
-    prog_status.caption("Analysing video...")
     frame_idx = 0
 
     while cap.isOpened():
@@ -185,17 +186,15 @@ def run_video(path: str):
 
         annotated = _draw_overlay(annotated, reps, phase, knee, cues, last)
 
-        if frame_idx % 2 == 0:
+        if frame_idx % 5 == 0:
             frame_holder.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), use_container_width=True)
             _update_sidebar(analyzer)
+            progress.progress(min(frame_idx / total_frames, 1.0))
 
         frame_idx += 1
-        progress.progress(min(frame_idx / total_frames, 1.0))
-        prog_status.caption(f"Frame {frame_idx}/{total_frames}")
 
     cap.release()
     pe.close()
-    prog_status.empty()
     progress.empty()
 
     _show_summary(analyzer)

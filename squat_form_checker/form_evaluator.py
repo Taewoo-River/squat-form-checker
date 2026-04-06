@@ -66,63 +66,70 @@ class SquatFormEvaluator:
     # Per-frame update
     # ------------------------------------------------------------------
     def update(self, landmarks: dict, pe: PoseEstimator) -> dict:
-        """Compute and return live metrics from the current frame's landmarks."""
-        pts = {
-            name: pe.get_point(landmarks, idx)
-            for name, idx in [
-                ("l_shoulder", PoseEstimator.LEFT_SHOULDER),
-                ("r_shoulder", PoseEstimator.RIGHT_SHOULDER),
-                ("l_hip", PoseEstimator.LEFT_HIP),
-                ("r_hip", PoseEstimator.RIGHT_HIP),
-                ("l_knee", PoseEstimator.LEFT_KNEE),
-                ("r_knee", PoseEstimator.RIGHT_KNEE),
-                ("l_ankle", PoseEstimator.LEFT_ANKLE),
-                ("r_ankle", PoseEstimator.RIGHT_ANKLE),
-            ]
-        }
-        if any(v is None for v in pts.values()):
+        """Compute and return live metrics from the current frame's landmarks.
+
+        Only the sagittal-plane landmarks on the best-visible side
+        (shoulder, hip, knee, ankle) are required.  This lets us keep
+        tracking even when a barbell occludes the face, hands, or the
+        opposite side.
+        """
+        def _pt(idx):
+            return pe.get_point(landmarks, idx)
+
+        def _vis(idx):
+            return pe.get_visibility(landmarks, idx)
+
+        l_vis = min(_vis(PoseEstimator.LEFT_HIP),
+                    _vis(PoseEstimator.LEFT_KNEE),
+                    _vis(PoseEstimator.LEFT_ANKLE))
+        r_vis = min(_vis(PoseEstimator.RIGHT_HIP),
+                    _vis(PoseEstimator.RIGHT_KNEE),
+                    _vis(PoseEstimator.RIGHT_ANKLE))
+
+        if l_vis >= r_vis:
+            shoulder = _pt(PoseEstimator.LEFT_SHOULDER)
+            hip      = _pt(PoseEstimator.LEFT_HIP)
+            knee     = _pt(PoseEstimator.LEFT_KNEE)
+            ankle    = _pt(PoseEstimator.LEFT_ANKLE)
+        else:
+            shoulder = _pt(PoseEstimator.RIGHT_SHOULDER)
+            hip      = _pt(PoseEstimator.RIGHT_HIP)
+            knee     = _pt(PoseEstimator.RIGHT_KNEE)
+            ankle    = _pt(PoseEstimator.RIGHT_ANKLE)
+
+        if any(p is None for p in (hip, knee, ankle)):
             return {}
 
         self._frame_count += 1
 
-        # Pick the more-visible side for sagittal-plane angles
-        l_vis = min(
-            pe.get_visibility(landmarks, PoseEstimator.LEFT_HIP),
-            pe.get_visibility(landmarks, PoseEstimator.LEFT_KNEE),
-            pe.get_visibility(landmarks, PoseEstimator.LEFT_ANKLE),
-        )
-        r_vis = min(
-            pe.get_visibility(landmarks, PoseEstimator.RIGHT_HIP),
-            pe.get_visibility(landmarks, PoseEstimator.RIGHT_KNEE),
-            pe.get_visibility(landmarks, PoseEstimator.RIGHT_ANKLE),
-        )
-
-        if l_vis >= r_vis:
-            hip, knee, ankle, shoulder = (
-                pts["l_hip"], pts["l_knee"], pts["l_ankle"], pts["l_shoulder"],
-            )
-        else:
-            hip, knee, ankle, shoulder = (
-                pts["r_hip"], pts["r_knee"], pts["r_ankle"], pts["r_shoulder"],
-            )
-
         knee_angle = calculate_angle(hip, knee, ankle)
-        hip_angle = calculate_angle(shoulder, hip, knee)
 
-        torso_dx = shoulder[0] - hip[0]
-        torso_dy = shoulder[1] - hip[1]
-        torso_lean = abs(math.degrees(math.atan2(abs(torso_dx), abs(torso_dy))))
+        if shoulder is not None:
+            hip_angle = calculate_angle(shoulder, hip, knee)
+            torso_dx = shoulder[0] - hip[0]
+            torso_dy = shoulder[1] - hip[1]
+            torso_lean = abs(math.degrees(math.atan2(abs(torso_dx), abs(torso_dy))))
+        else:
+            hip_angle = 0.0
+            torso_lean = 0.0
 
-        # Knee-valgus proxy (frontal plane): knee spread vs ankle spread
-        knee_spread = abs(pts["l_knee"][0] - pts["r_knee"][0])
-        ankle_spread = abs(pts["l_ankle"][0] - pts["r_ankle"][0])
-        knee_ratio = knee_spread / max(ankle_spread, 1.0)
+        # Knee-valgus proxy -- only when both sides are available
+        l_knee_pt = _pt(PoseEstimator.LEFT_KNEE)
+        r_knee_pt = _pt(PoseEstimator.RIGHT_KNEE)
+        l_ankle_pt = _pt(PoseEstimator.LEFT_ANKLE)
+        r_ankle_pt = _pt(PoseEstimator.RIGHT_ANKLE)
 
-        # Accumulate for per-rep scoring
+        if all(p is not None for p in (l_knee_pt, r_knee_pt, l_ankle_pt, r_ankle_pt)):
+            knee_spread = abs(l_knee_pt[0] - r_knee_pt[0])
+            ankle_spread = abs(l_ankle_pt[0] - r_ankle_pt[0])
+            knee_ratio = knee_spread / max(ankle_spread, 1.0)
+            if knee_ratio < self.valgus_ratio_threshold:
+                self._valgus_frames += 1
+        else:
+            knee_ratio = 1.0
+
         self._min_knee_angle = min(self._min_knee_angle, knee_angle)
         self._max_torso_lean = max(self._max_torso_lean, torso_lean)
-        if knee_ratio < self.valgus_ratio_threshold:
-            self._valgus_frames += 1
 
         return {
             "knee_angle": knee_angle,

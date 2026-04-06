@@ -20,10 +20,10 @@ from mediapipe.tasks.python.vision import (
 
 _MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
-    "pose_landmarker/pose_landmarker_lite/float16/latest/"
-    "pose_landmarker_lite.task"
+    "pose_landmarker/pose_landmarker_full/float16/latest/"
+    "pose_landmarker_full.task"
 )
-_MODEL_PATH = os.path.join(os.path.dirname(__file__), "pose_landmarker_lite.task")
+_MODEL_PATH = os.path.join(os.path.dirname(__file__), "pose_landmarker_full.task")
 
 
 class PoseEstimator:
